@@ -20,6 +20,12 @@ register(
 )
 
 register(
+    id="GPickPlaceCube-v0",
+    entry_point="gym_lowcostrobot.envs:GPickPlaceCubeEnv",
+    max_episode_steps=500,
+)
+
+register(
     id="PushCube-v0",
     entry_point="gym_lowcostrobot.envs:PushCubeEnv",
     max_episode_steps=500,

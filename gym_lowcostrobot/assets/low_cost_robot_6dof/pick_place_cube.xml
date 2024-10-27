@@ -22,11 +22,11 @@
   
     <worldbody>
       <light pos="0 0 3" dir="0 0 -1" directional="false"/>
-      <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" pos="0 0 0" friction="0.1"/>
+      <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" pos="0 0 0" friction="0."/>
       <body name="cube" pos="0.0 0.2 0.01">
           <freejoint name="red_box_joint"/>
-          <inertial pos="0 0 0" mass="10" diaginertia="0.00016667 0.00016667 0.00016667"/>
-          <geom friction="0.5" condim="4" pos="0 0 0" size="0.015 0.015 0.015" type="box" name="red_box" rgba="0.5 0 0 1" priority="1"/>
+          <inertial pos="0 0 0" mass="1." diaginertia="0.00016667 0.00016667 0.00016667"/>
+          <geom friction="1.5" condim="4" pos="0 0 0" size="0.005 0.025 0.015" type="box" name="red_box" rgba="0.5 0 0 1" priority="2"/>
       </body>
 
 		<camera name="camera_front" pos="0.049 0.5 0.225" xyaxes="-0.998 0.056 -0.000 -0.019 -0.335 0.942"/>

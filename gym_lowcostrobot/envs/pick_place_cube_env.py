@@ -1,4 +1,4 @@
-import os
+import os, time
 
 import gymnasium as gym
 import mujoco
@@ -7,6 +7,9 @@ import numpy as np
 from gymnasium import Env, spaces
 
 from gym_lowcostrobot import ASSETS_PATH, BASE_LINK_NAME
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 
 class PickPlaceCubeEnv(Env):
@@ -75,7 +78,7 @@ class PickPlaceCubeEnv(Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 200}
 
-    def __init__(self, observation_mode="image", action_mode="joint", render_mode=None):
+    def __init__(self, observation_mode="state", action_mode="joint", render_mode=None):
         # Load the MuJoCo model and data
         self.model = mujoco.MjModel.from_xml_path(os.path.join(ASSETS_PATH, "pick_place_cube.xml"), {})
         self.data = mujoco.MjData(self.model)
@@ -127,8 +130,11 @@ class PickPlaceCubeEnv(Env):
         if self.arm_dof_id != 0:
             self.arm_dof_id = self.arm_dof_vel_id + 1
 
-        self.control_decimation = 4 # number of simulation steps per control step
+        self.control_decimation = 2 # number of simulation steps per control step
 
+        self.tolerance = 0.015
+
+        self.total_steps = 0
 
     def inverse_kinematics(self, ee_target_pos, step=0.2, joint_name="link_6", nb_dof=6, regularization=1e-6):
         """
@@ -179,6 +185,179 @@ class PickPlaceCubeEnv(Env):
 
         return q_target_pos
 
+
+    def check_joint_limits(self, q):
+        """Check if the joints is under or above its limits"""
+
+        target_low = np.array([-3.14159, -1.5708, -1.48353, -1.91986, -2.96706, -1.74533])
+        target_high = np.array([3.14159, 1.22173, 1.74533, 1.91986, 2.96706, 0.0523599])
+        target_qpos = np.array(q).clip(target_low, target_high)
+
+    def plot_ee_traj(self, list_ee_pos, ee_pos_start, ee_target_pos):
+        # Separate the points into x, y, and z coordinates
+        x = [p[0] for p in list_ee_pos]
+        y = [p[1] for p in list_ee_pos]
+        z = [p[2] for p in list_ee_pos]
+
+        # Create a 3D scatter plot
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(x, y, z, c='b', marker='.')  # Customize color and marker as needed
+
+        ax.scatter(ee_pos_start[0], ee_pos_start[1], ee_pos_start[2], c="r", marker="o")
+        ax.scatter(ee_target_pos[0], ee_target_pos[1], ee_target_pos[2], c="orange", marker="o")
+
+        # Label axes
+        ax.set_xlabel('X Label')
+        ax.set_ylabel('Y Label')
+        ax.set_zlabel('Z Label')
+
+        plt.show()
+
+    def open_gripper(self, nb_steps_open=10):
+
+        new_ctrl = np.zeros((6,))
+        new_ctrl[-3] = -np.pi/2
+        self.data.ctrl += new_ctrl
+
+        for _ in range(nb_steps_open):
+            # time.sleep(0.01)
+            print("rotating...")
+            
+            mujoco.mj_step(self.model, self.data)
+            self.total_steps += 1
+
+            if self.render_mode == "human":
+                self.viewer.sync()
+
+        # self.data.ctrl[-3] = 0.
+
+        new_ctrl = np.zeros((6,))
+        new_ctrl[-1] = -np.pi/2
+        self.data.ctrl += new_ctrl
+        
+        for _ in range(nb_steps_open):
+            # time.sleep(0.01)
+            print("openning...")
+
+            mujoco.mj_step(self.model, self.data)
+            self.total_steps += 1
+
+            if self.render_mode == "human":
+                self.viewer.sync()
+
+        # self.data.ctrl[-1] = 0.
+
+    def close_gripper(self, nb_steps_close=10):
+        
+
+        # new_ctrl = np.zeros((6,))
+        # new_ctrl[-1:] = 3*np.pi/6
+        self.data.ctrl[-1] = np.pi/6
+
+        for _ in range(nb_steps_close):
+            # time.sleep(0.01)
+            print("openning...")
+
+            mujoco.mj_step(self.model, self.data)
+            self.total_steps += 1
+
+            if self.render_mode == "human":
+                self.viewer.sync()
+
+        # new_ctrl = np.zeros((6,))
+        # new_ctrl[1] = np.pi/5
+        # self.data.ctrl += new_ctrl
+
+        # for _ in range(nb_steps_close):
+        #     time.sleep(0.01)
+        #     print("rotating...")
+            
+        #     mujoco.mj_step(self.model, self.data)
+
+        #     if self.render_mode == "human":
+        #         self.viewer.sync()
+            
+
+    def inverse_kinematics_GD(self, ee_target_pos, step=0.2, joint_name="link_4", nb_dof=6, regularization=1e-6):
+        """
+        Computes the inverse kinematics for a robotic arm to reach the target end effector position.
+
+        :param ee_target_pos: numpy array of target end effector position [x, y, z]
+        :param step: float, step size for the iteration
+        :param joint_name: str, name of the end effector joint
+        :param nb_dof: int, number of degrees of freedom
+        :param regularization: float, regularization factor for the pseudoinverse computation
+        :return: numpy array of target joint positions
+        """
+        try:
+            # Get the joint ID from the name
+            joint_id = self.model.body(joint_name).id
+        except KeyError:
+            raise ValueError(f"Body name '{joint_name}' not found in the model.")
+
+        # Get the current end effector position
+        # ee_pos = self.d.geom_xpos[joint_id]
+        ee_id = self.model.body(joint_name).id
+        ee_pos = self.data.xpos[ee_id]
+
+        ee_pos_start = ee_pos.copy()
+
+        # Compute the difference between target and current end effector positions
+        delta_pos = ee_target_pos - ee_pos
+        print("Error = ", np.linalg.norm(delta_pos))
+
+        self.alpha = 0.5
+        self.step_size = 1.
+
+        list_ee_pos = []
+
+        nb_steps = 0
+        while(np.linalg.norm(delta_pos) >= self.tolerance and nb_steps <= 1000):
+
+            # time.sleep(0.01)
+
+            print("Error = ", np.linalg.norm(delta_pos))
+
+            # Compute the Jacobian
+            jacp = np.zeros((3, self.model.nv))
+            jacr = np.zeros((3, self.model.nv))
+            mujoco.mj_jacBodyCom(self.model, self.data, jacp, jacr, joint_id)
+
+            grad = self.alpha * jacp.T @ delta_pos 
+
+            self.data.ctrl += self.step_size*grad[:6]#np.concatenate((self.step_size * grad, np.array([0])))
+            
+            # self.data.ctrl[-2:] -= 0.01
+            # self.check_joint_limits(self.data.qpos[6:12])
+
+            # mujoco.mj_step(self.model, self.data)
+            for _ in range(self.control_decimation):
+                mujoco.mj_step(self.model, self.data)
+                
+                if self.render_mode == "human":
+                    self.viewer.sync()
+            self.total_steps += 1
+
+            if self.render_mode == "human":
+                self.viewer.sync()
+
+            # Update error
+            ee_id = self.model.body(joint_name).id
+            ee_pos = self.data.xpos[ee_id]
+            delta_pos = ee_target_pos - ee_pos
+
+            list_ee_pos.append(ee_pos.copy())
+
+            nb_steps += 1
+            print(nb_steps)
+
+        # diplay trajectories 
+        if self.render_mode == None: 
+            self.plot_ee_traj(list_ee_pos, ee_pos_start, ee_target_pos)
+
+        return 
+
     def apply_action(self, action):
         """
         Step the simulation forward based on the action
@@ -194,14 +373,18 @@ class PickPlaceCubeEnv(Env):
             # Update the robot position based on the action
             ee_id = self.model.body("link_6").id
             ee_target_pos = self.data.xpos[ee_id] + ee_action
+            # ee_target_pos =  ee_action
 
             # Use inverse kinematics to get the joint action wrt the end effector current position and displacement
             target_qpos = self.inverse_kinematics(ee_target_pos=ee_target_pos)
             target_qpos[-1:] = gripper_action
+
         elif self.action_mode == "joint":
+            action, gripper_action = action[:6], action[-1]
             target_low = np.array([-3.14159, -1.5708, -1.48353, -1.91986, -2.96706, -1.74533])
             target_high = np.array([3.14159, 1.22173, 1.74533, 1.91986, 2.96706, 0.0523599])
             target_qpos = np.array(action).clip(target_low, target_high)
+            # target_qpos = action.copy()
         else:
             raise ValueError("Invalid action mode, must be 'ee' or 'joint'")
 
@@ -231,12 +414,13 @@ class PickPlaceCubeEnv(Env):
             observation["cube_pos"] = self.data.qpos[self.cube_dof_id:self.cube_dof_id+3].astype(np.float32)
         return observation
 
-    def reset(self, seed=None, options=None):
+    def reset_model(self, seed=None, options=None):
         # We need the following line to seed self.np_random
         super().reset(seed=seed, options=options)
 
         # Reset the robot to the initial position and sample the cube position
-        cube_pos = self.np_random.uniform(self.cube_low, self.cube_high)
+        # cube_pos = self.np_random.uniform(self.cube_low, self.cube_high)
+        cube_pos = np.array([0.0, 0.13, 0.015])
         cube_rot = np.array([1.0, 0.0, 0.0, 0.0])
         robot_qpos = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.data.qpos[self.arm_dof_id:self.arm_dof_id+self.nb_dof] = robot_qpos
@@ -252,6 +436,9 @@ class PickPlaceCubeEnv(Env):
         mujoco.mj_forward(self.model, self.data)
 
         return self.get_observation(), {}
+    
+    def reset(self, seed=None, options=None):
+        return self.reset_model(seed=seed, options=options)
 
     def step(self, action):
         # Perform the action and step the simulation
