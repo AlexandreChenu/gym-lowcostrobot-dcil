@@ -22,7 +22,7 @@ def read_dataset():
 
     print(dataset)
 
-def do_env_sim():
+def test_env():
     env = gym.make("PickPlaceCube-v0", render_mode="human")#, observation_mode="state", render_mode="human", action_mode="ee")
     env.reset()
 
@@ -68,22 +68,6 @@ def test_demo():
 
     mujoco.mj_forward(env.model, env.data)
 
-    # for action in list_actions: 
-    #     observation, reward, terminated, truncated, info = env.step(action)
-
-    #     # print("Observation:", observation)
-    #     # print("Reward:", reward)
-
-    #     env.render()
-    #     if terminated:
-    #         if not truncated:
-    #             print(f"Cube reached the target position at step: {env.current_step} with reward {reward}")
-    #         else:
-    #             print(
-    #                 f"Cube didn't reached the target position at step: {env.current_step} with reward {reward} but was truncated"
-    #             )
-    #         env.reset()
-
     for state in list_states: 
         time.sleep(0.02)
         env.data.qpos[env.arm_dof_id:env.arm_dof_id+env.nb_dof] = state
@@ -124,9 +108,6 @@ def test_waypoints_follow():
     
     # position above cube 
     ee_initial_pos = env.data.xpos[env.model.body("link_6").id].copy()
-    # desired_ee_pos = env.data.xpos[env.model.body("cube").id].copy()
-    # desired_ee_pos[-1] = ee_initial_pos[-1].copy()
-    # list_waypoints_approach.append(desired_ee_pos.copy())
 
     # get closer to the cube 
     desired_ee_pos = env.data.xpos[env.model.body("cube").id].copy()
@@ -136,19 +117,12 @@ def test_waypoints_follow():
     list_waypoints_approach.append(desired_ee_pos.copy())
     list_waypoints_return.append(desired_ee_pos.copy())
 
-
-
     # place wirst above the cube
     for waypoint in list_waypoints_approach: 
         # desired_ee_pos = env.np_random.uniform(env.cube_low, env.cube_high)
         env.inverse_kinematics_GD(waypoint, joint_name="link_4")
 
     ## Phase 2 -> grasping 
-
-    
-
-    # position gripper in "from above position"
-
 
     # open the gripper
     env.open_gripper(nb_steps_open=200)
@@ -182,12 +156,14 @@ def test_waypoints_follow():
 
     print("total steps = ", env.total_steps)
 
+    ## TODO save demo in HF dataset format (.parquet)
+
     time.sleep(2)
 
 
 if __name__ == "__main__":
     # test_demo()
     # read_dataset()
-    # do_env_sim()
+    # test_env()
     # test_IK()
     test_waypoints_follow()
