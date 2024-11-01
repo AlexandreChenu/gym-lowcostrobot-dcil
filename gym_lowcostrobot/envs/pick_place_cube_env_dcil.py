@@ -6,8 +6,11 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 import numpy as np
+import pandas as pd
+
 from os import path
 
+# from pick_place_cube_env import *
 from .pick_place_cube_env import *
 
 import gymnasium as gym
@@ -63,9 +66,9 @@ def goal_distance(goal_a, goal_b):
 
 def default_compute_reward(
 		achieved_goal: np.ndarray,
-		desired_goal: np.ndarray):
+		desired_goal: np.ndarray,
+		distance_threshold = 0.1):
 	
-	distance_threshold = 0.1
 	reward_type = "sparse"
 	d = goal_distance(achieved_goal, desired_goal)
 	if reward_type == "sparse":
@@ -73,8 +76,8 @@ def default_compute_reward(
 	else:
 		return -d
 
-def default_success_function(achieved_goal, desired_goal):
-	distance_threshold = 0.1
+def default_success_function(achieved_goal, desired_goal, distance_threshold=0.1):
+
 	d = goal_distance(achieved_goal, desired_goal)
 	return 1.0 * (d <= distance_threshold)
 
@@ -91,6 +94,7 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 		self.init_qvel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 		
 		self.max_episode_steps = 1000
+		self.max_steps = 500
 
 		high = np.ones(self._obs_dim)
 		low = -high
@@ -118,6 +122,8 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 		self.set_reward_function(default_compute_reward)
 
 		self._is_success = None
+
+		self.distance_threshold = 0.01
 
 		# print("self.max_episode_steps.shape = ", self.max_episode_steps.shape)
 		# self.set_success_function(default_success_function)
@@ -171,33 +177,27 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 			'desired_goal': self.goal.copy(),
 		}, {}
 	
-	# TODO: ajouter la position de l'objet dans l'obs
 	def _get_obs(self):
-		position = self.data.qpos[self.arm_dof_id:self.arm_dof_id+self.nb_dof].copy()
-		velocity = self.data.qvel[self.arm_dof_id:self.arm_dof_id+self.nb_dof].copy()
-
-		joint_name = "link_6"
-		ee_id = self.model.body(joint_name).id
-		ee_pos = self.data.geom_xpos[ee_id]
-
-		cube_pos = self.data.qpos[self.cube_dof_id:self.cube_dof_id+3].astype(np.float32)
-
-		observation = np.concatenate((position, velocity, ee_pos, cube_pos)).ravel()
+		
+		obs_ = self.get_observation_()
+		observation = np.concatenate((obs_["arm_qpos"], obs_["arm_qvel"], obs_["ee_pos"], obs_["cube_pos"]), axis=0).ravel()
 
 		return observation
 	
 	## TODO: intégrer cube_pos et cube_rot
-	def set_state(self, qpos, qvel, cube_pos, cube_rot):
-		# self.data.qpos[:] = np.copy(qpos)
-		self.data.qpos[self.arm_dof_id:self.arm_dof_id+self.nb_dof] = np.copy(qpos)
-		self.data.qvel[self.arm_dof_id:self.arm_dof_id+self.nb_dof] = np.copy(qvel)
-		# self.data.qvel[:] = np.copy(qvel)
+	def set_state(self, qpos, qvel, cube_pos):
+		# TODO on a physical robot, one can only set the robot to an initial position => test if reset instead of set_state works fine
 
-		self.data.qpos[self.cube_dof_id:self.cube_dof_id + 7] = np.concatenate([cube_pos, cube_rot])
+		# self.data.qpos[self.arm_dof_id:self.arm_dof_id+self.nb_dof] = np.copy(qpos)
+		# self.data.qvel[self.arm_dof_id:self.arm_dof_id+self.nb_dof] = np.copy(qvel)
 
-		# if self.model.na == 0:
-		# 	self.data.act[:] = None
-		mujoco.mj_forward(self.model, self.data)
+		# cube_rot = cube_rot = np.array([1.0, 0.0, 0.0, 0.0])
+
+		# self.data.qpos[self.cube_dof_id:self.cube_dof_id + 7] = np.concatenate([cube_pos, cube_rot])
+
+		# mujoco.mj_forward(self.model, self.data)
+
+		self.reset()
 
 
 	def set_state_(self, state, new_state_bool=1):
@@ -205,9 +205,9 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 		if new_state_bool:
 			new_qpos = state[:self.init_qpos.shape[0]]
 			new_qvel = state[self.init_qpos.shape[0]:2*self.init_qpos.shape[0]]
-			cube_pos = state[2*self.init_qpos.shape[0]:2*self.init_qpos.shape[0]+3]
-			cube_rot = state[2*self.init_qpos.shape[0]+3: 2*self.init_qpos.shape[0] + 3 + 4]
-			self.set_state(new_qpos, new_qvel, cube_pos, cube_rot)
+			cube_pos = state[-3:]
+			# cube_rot = state[2*self.init_qpos.shape[0]+3: 2*self.init_qpos.shape[0] + 7]
+			self.set_state(new_qpos, new_qvel, cube_pos)
 
 			self.state = self._get_obs()
 		return self.get_state()
@@ -215,7 +215,7 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 	def get_state(self):
 		return self._get_obs()
 
-	def get_observation_(self):
+	def get_observation(self):
 		return {
 			'observation': self.state.copy(),
 			'achieved_goal': self.project_to_goal_space(self.state),
@@ -229,9 +229,9 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 	def get_goal(self,):
 		return self.goal
 
-	def set_max_episode_steps(self, max_episode_steps, new_max_episode_steps_bool):
+	def set_max_episode_steps(self, max_steps, new_max_episode_steps_bool):
 		if new_max_episode_steps_bool:
-			self.max_episode_steps = max_episode_steps
+			self.max_steps = max_steps
 
 	def _sample_goal(self):
 		return self.project_to_goal_space(np.random.rand(18) * 10 )
@@ -242,10 +242,12 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 		# Perform the action and step the simulation
 		self.apply_action(action)
 
+		self.steps += 1
+
 		self.state = self._get_obs()
 		terminated = False
 
-		reward = self.compute_reward(self.project_to_goal_space(self.state), self.goal)
+		reward = self.compute_reward(self.project_to_goal_space(self.state), self.goal, distance_threshold = self.distance_threshold)
 		reward = np.array(reward).reshape(1,)
 
 		is_success = reward.copy()
@@ -253,7 +255,7 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 		done = np.zeros(is_success.shape)
 		terminated = done.copy()
 
-		truncation = np.array((self.steps >= self.max_episode_steps)).astype(int).reshape(1,)
+		truncation = np.array((self.steps >= self.max_steps)).astype(int).reshape(1,)
 
 		info = {
 			'is_success': is_success,
@@ -267,11 +269,7 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 			self.render()
 			
 		return (
-			{
-				'observation': self.state.copy(),
-				'achieved_goal': self.project_to_goal_space(self.state),
-				'desired_goal': self.goal.copy(),
-			},
+			self.get_observation(),
 			reward,
 			terminated, 
 			truncation, 
@@ -280,15 +278,23 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 
 if (__name__=='__main__'):
 
-	env = GPickPlaceCubeEnv(render_mode = "human")
+	env = GPickPlaceCubeEnv()#render_mode = "human")
 
 	obs, info = env.reset()
 	# print("obs = ", obs)
 
-	for i in range(200):
+	list_ee_pos = []
+
+	for i in range(1000):
 		
 		action = env.action_space.sample()
 		# print("sim_state = ", env.sim.get_state())
-		env.step(action)
+		obs, _, _, _, _ = env.step(action)
 
-		env.render()
+		print("obs = ", obs["achieved_goal"])
+
+		list_ee_pos.append(obs["achieved_goal"][:3])
+
+		# env.render()
+
+	env.plot_ee_traj(list_ee_pos, list_ee_pos[0], list_ee_pos[-1])

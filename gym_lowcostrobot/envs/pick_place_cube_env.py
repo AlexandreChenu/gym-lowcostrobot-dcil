@@ -103,6 +103,7 @@ class PickPlaceCubeEnv(Env):
             self.renderer = mujoco.Renderer(self.model)
         if self.observation_mode in ["state", "both"]:
             observation_subspaces["cube_pos"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
+            observation_subspaces["ee_pos"] = spaces.Box(low=-10.0, high=10.0, shape=(3,))
         self.observation_space = gym.spaces.Dict(observation_subspaces)
 
         # Set the render utilities
@@ -130,7 +131,7 @@ class PickPlaceCubeEnv(Env):
         if self.arm_dof_id != 0:
             self.arm_dof_id = self.arm_dof_vel_id + 1
 
-        self.control_decimation = 2 # number of simulation steps per control step
+        self.control_decimation = 10 # number of simulation steps per control step
 
         self.tolerance = 0.015
 
@@ -220,12 +221,19 @@ class PickPlaceCubeEnv(Env):
         new_ctrl[-3] = -np.pi/2
         self.data.ctrl += new_ctrl
 
+        list_observations = []
+
         for _ in range(nb_steps_open):
             # time.sleep(0.01)
             print("rotating...")
+
+            list_observations.append(self.get_observation_().copy())
             
-            mujoco.mj_step(self.model, self.data)
-            self.total_steps += 1
+            for _ in range(self.control_decimation):
+                mujoco.mj_step(self.model, self.data)
+                
+                if self.render_mode == "human":
+                    self.viewer.sync()
 
             if self.render_mode == "human":
                 self.viewer.sync()
@@ -240,13 +248,20 @@ class PickPlaceCubeEnv(Env):
             # time.sleep(0.01)
             print("openning...")
 
-            mujoco.mj_step(self.model, self.data)
+            list_observations.append(self.get_observation_().copy())
+
+            for _ in range(self.control_decimation):
+                mujoco.mj_step(self.model, self.data)
+                
+                if self.render_mode == "human":
+                    self.viewer.sync()
+
             self.total_steps += 1
 
             if self.render_mode == "human":
                 self.viewer.sync()
 
-        # self.data.ctrl[-1] = 0.
+        return list_observations
 
     def close_gripper(self, nb_steps_close=10):
         
@@ -255,29 +270,27 @@ class PickPlaceCubeEnv(Env):
         # new_ctrl[-1:] = 3*np.pi/6
         self.data.ctrl[-1] = np.pi/6
 
+        list_observations = []
+
         for _ in range(nb_steps_close):
             # time.sleep(0.01)
             print("openning...")
 
-            mujoco.mj_step(self.model, self.data)
+            list_observations.append(self.get_observation_().copy())
+
+            for _ in range(self.control_decimation):
+                mujoco.mj_step(self.model, self.data)
+                
+                if self.render_mode == "human":
+                    self.viewer.sync()
+
             self.total_steps += 1
 
             if self.render_mode == "human":
                 self.viewer.sync()
 
-        # new_ctrl = np.zeros((6,))
-        # new_ctrl[1] = np.pi/5
-        # self.data.ctrl += new_ctrl
-
-        # for _ in range(nb_steps_close):
-        #     time.sleep(0.01)
-        #     print("rotating...")
-            
-        #     mujoco.mj_step(self.model, self.data)
-
-        #     if self.render_mode == "human":
-        #         self.viewer.sync()
-            
+        return list_observations 
+    
 
     def inverse_kinematics_GD(self, ee_target_pos, step=0.2, joint_name="link_4", nb_dof=6, regularization=1e-6):
         """
@@ -307,13 +320,17 @@ class PickPlaceCubeEnv(Env):
         delta_pos = ee_target_pos - ee_pos
         print("Error = ", np.linalg.norm(delta_pos))
 
-        self.alpha = 0.5
+        self.alpha = 1.
         self.step_size = 1.
+
+        list_observations = []
 
         list_ee_pos = []
 
         nb_steps = 0
         while(np.linalg.norm(delta_pos) >= self.tolerance and nb_steps <= 1000):
+
+            list_observations.append(self.get_observation_().copy())
 
             # time.sleep(0.01)
 
@@ -356,7 +373,7 @@ class PickPlaceCubeEnv(Env):
         if self.render_mode == None: 
             self.plot_ee_traj(list_ee_pos, ee_pos_start, ee_target_pos)
 
-        return 
+        return list_observations 
 
     def apply_action(self, action):
         """
@@ -397,7 +414,7 @@ class PickPlaceCubeEnv(Env):
             if self.render_mode == "human":
                 self.viewer.sync()
 
-    def get_observation(self):
+    def get_observation_(self):
         # qpos is [x, y, z, qw, qx, qy, qz, q1, q2, q3, q4, q5, q6, gripper]
         # qvel is [vx, vy, vz, wx, wy, wz, dq1, dq2, dq3, dq4, dq5, dq6, dgripper]
         observation = {
@@ -412,6 +429,8 @@ class PickPlaceCubeEnv(Env):
             observation["image_top"] = self.renderer.render()
         if self.observation_mode in ["state", "both"]:
             observation["cube_pos"] = self.data.qpos[self.cube_dof_id:self.cube_dof_id+3].astype(np.float32)
+            observation["ee_pos"] = self.data.xpos[self.model.body("link_6").id].astype(np.float32)
+
         return observation
 
     def reset_model(self, seed=None, options=None):
@@ -435,7 +454,7 @@ class PickPlaceCubeEnv(Env):
         # Step the simulation
         mujoco.mj_forward(self.model, self.data)
 
-        return self.get_observation(), {}
+        return self.get_observation_(), {}
     
     def reset(self, seed=None, options=None):
         return self.reset_model(seed=seed, options=options)
@@ -445,7 +464,7 @@ class PickPlaceCubeEnv(Env):
         self.apply_action(action)
 
         # Get the new observation
-        observation = self.get_observation()
+        observation = self.get_observation_()
 
         # Get the position of the cube and the distance between the end effector and the cube
         cube_pos = self.data.qpos[self.cube_dof_id:self.cube_dof_id+3]
@@ -469,3 +488,27 @@ class PickPlaceCubeEnv(Env):
             self.renderer.close()
         if self.render_mode == "rgb_array":
             self.rgb_array_renderer.close()
+
+
+if (__name__=='__main__'):
+
+	env = PickPlaceCubeEnv()#render_mode = "human")
+
+	obs, info = env.reset()
+	# print("obs = ", obs)
+
+	list_ee_pos = []
+
+	for i in range(200):
+		
+		action = env.action_space.sample()
+		# print("sim_state = ", env.sim.get_state())
+		obs, _, _, _, _ = env.step(action)
+
+		print("obs = ", obs["ee_pos"])
+
+		list_ee_pos.append(obs["ee_pos"].copy())
+
+		# env.render()
+
+	env.plot_ee_traj(list_ee_pos, list_ee_pos[0], list_ee_pos[-1])

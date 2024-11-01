@@ -96,15 +96,24 @@ def test_IK():
     time.sleep(2)
 
 def test_waypoints_follow():
+    """ 
+    Follows a few manually set waypoints using IK to achieve object grasping. 
+        NOTE : .xlm files were changed to make grasping easier to grasp (thiner object).  
+    """
 
     env = gym.make("PickPlaceCube-v0", observation_mode="state", render_mode="human", action_mode="joint")#, observation_mode="state", render_mode="human", action_mode="ee")
     env.reset()
 
+    # logs
+    list_observations = []
+    
+    # waypoints
     list_waypoints_approach = []
     list_waypoints_grasping = []
     list_waypoints_return = []
     
-    ## Phase 1 -> approach
+    ## Phase 1 
+    ##                  -> approach
     
     # position above cube 
     ee_initial_pos = env.data.xpos[env.model.body("link_6").id].copy()
@@ -119,18 +128,18 @@ def test_waypoints_follow():
 
     # place wirst above the cube
     for waypoint in list_waypoints_approach: 
-        # desired_ee_pos = env.np_random.uniform(env.cube_low, env.cube_high)
-        env.inverse_kinematics_GD(waypoint, joint_name="link_4")
+        list_observations_IK = env.inverse_kinematics_GD(waypoint, joint_name="link_4")
+        list_observations += list_observations_IK
 
-    ## Phase 2 -> grasping 
+    ## Phase 2 
+    ##                  -> grasping 
 
     # open the gripper
-    env.open_gripper(nb_steps_open=200)
-    # time.sleep(1.)
+    list_observations_open = env.open_gripper(nb_steps_open=10)
+    list_observations += list_observations_open
 
     # position the gripper around the object
     desired_ee_pos = env.data.xpos[env.model.body("cube").id].copy()
-
     desired_ee_pos[0] += 0.005
     desired_ee_pos[1] += 0.02
     desired_ee_pos[-1] += 0.023
@@ -138,27 +147,44 @@ def test_waypoints_follow():
     list_waypoints_grasping.append(desired_ee_pos.copy())
 
     for waypoint in list_waypoints_grasping: 
-        # desired_ee_pos = env.np_random.uniform(env.cube_low, env.cube_high)
-        env.inverse_kinematics_GD(waypoint, joint_name="link_6")
+        list_observations_IK = env.inverse_kinematics_GD(waypoint, joint_name="link_6")
+        list_observations += list_observations_IK 
 
     # close the gripper 
-    env.close_gripper(nb_steps_close=200)
-    # time.sleep(1.)
+    list_observations_close = env.close_gripper(nb_steps_close=20)
+    list_observations += list_observations_close
 
-    # Phase 3 -> moving the cube back to initial position
+    ## Phase 3 
+    ##              -> moving the cube back to initial position
     
     desired_ee_pos = ee_initial_pos
     # list_waypoints_return.append(desired_ee_pos.copy())
 
     for waypoint in list_waypoints_return: 
         # desired_ee_pos = env.np_random.uniform(env.cube_low, env.cube_high)
-        env.inverse_kinematics_GD(waypoint, "link_6")    
+        list_observations_IK = env.inverse_kinematics_GD(waypoint, "link_6")    
+        list_observations += list_observations_IK
 
     print("total steps = ", env.total_steps)
+    print("list_observations length = ", len(list_observations))
 
-    ## TODO save demo in HF dataset format (.parquet)
+    print(list_observations[:10])
+          
+    save_demo(list_observations)
 
     time.sleep(2)
+
+def save_demo(list_observations, save_dir = "/Users/achenu/Documents/Research/robotics/github_repos/gym-lowcostrobot-dcil/demos/"):
+    # TODO adapt to HF demo format 
+
+    demo_dict = {"observation.arm_qpos" : [obs["arm_qpos"] for obs in list_observations], 
+                 "observation.arm_qvel" : [obs["arm_qvel"] for obs in list_observations], 
+                 "observation.cube_pos" : [obs["cube_pos"] for obs in list_observations], 
+                 "observation.ee_pos" : [obs["ee_pos"] for obs in list_observations],
+                 "observation.full" : [np.concatenate((obs["arm_qpos"], obs["arm_qvel"], obs["ee_pos"], obs["cube_pos"]), axis=0) for obs in list_observations]}
+    
+    df = pd.DataFrame(demo_dict)
+    df.to_parquet(save_dir + "demo.parquet", engine='pyarrow')
 
 
 if __name__ == "__main__":
