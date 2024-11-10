@@ -98,8 +98,8 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 
 		high = np.ones(self._obs_dim)
 		low = -high
-		self._achieved_goal_dim = 6
-		self._desired_goal_dim = 6
+		self._achieved_goal_dim = 3 #6
+		self._desired_goal_dim = 3 #6
 		high_achieved_goal = np.ones(self._achieved_goal_dim)
 		low_achieved_goal = -high_achieved_goal
 		high_desired_goal = np.ones(self._desired_goal_dim)
@@ -131,7 +131,7 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 	def project_to_goal_space(self, state):
 		# 3D cartesian position of end-effector + 3D cartesian position of object
 	
-		return state[12:18]
+		return state[12:15]
 
 	def get_obs_dim(self):
 		return self._obs_dim
