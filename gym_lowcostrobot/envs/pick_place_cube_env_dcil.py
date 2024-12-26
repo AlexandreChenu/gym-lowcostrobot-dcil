@@ -67,7 +67,7 @@ def goal_distance(goal_a, goal_b):
 def default_compute_reward(
 		achieved_goal: np.ndarray,
 		desired_goal: np.ndarray,
-		distance_threshold = 0.1):
+		distance_threshold = 0.01):
 	
 	reward_type = "sparse"
 	d = goal_distance(achieved_goal, desired_goal)
@@ -76,7 +76,7 @@ def default_compute_reward(
 	else:
 		return -d
 
-def default_success_function(achieved_goal, desired_goal, distance_threshold=0.1):
+def default_success_function(achieved_goal, desired_goal, distance_threshold=0.01):
 
 	d = goal_distance(achieved_goal, desired_goal)
 	return 1.0 * (d <= distance_threshold)
@@ -94,7 +94,7 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 		self.init_qvel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 		
 		self.max_episode_steps = 1000
-		self.max_steps = 500
+		self.max_steps = 1000
 
 		high = np.ones(self._obs_dim)
 		low = -high
@@ -131,7 +131,7 @@ class GPickPlaceCubeEnv(PickPlaceCubeEnv, GoalEnv, utils.EzPickle, ABC):
 	def project_to_goal_space(self, state):
 		# 3D cartesian position of end-effector + 3D cartesian position of object
 	
-		return state[12:15]
+		return state[12:15].copy()
 
 	def get_obs_dim(self):
 		return self._obs_dim
